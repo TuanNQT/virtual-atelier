@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { Upload, X, Loader2 } from 'lucide-react';
-import { User } from '../types';
+import { User } from '../../types';
 
 interface AdminPageProps {
   adminEmail: string;
