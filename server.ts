@@ -1,52 +1,56 @@
 import express from "express";
 import { createServer as createViteServer } from "vite";
-import Database from "better-sqlite3";
 import dotenv from "dotenv";
 import path from "path";
 import { fileURLToPath } from "url";
+import {
+  initializeSheet,
+  getUserByEmail,
+  addUser,
+  updateRequestCount,
+  getAllUsers,
+  deleteUser,
+  seedInitialUser,
+} from "./lib/googleSheets.js";
 
 dotenv.config();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const db = new Database("access_control.db");
-
-// Initialize Database
-db.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    email TEXT PRIMARY KEY,
-    request_count INTEGER DEFAULT 0
-  )
-`);
-
-// Seed initial user if provided in ENV
-const initialEmail = process.env.INITIAL_ALLOWED_EMAIL;
-if (initialEmail) {
-  const stmt = db.prepare("INSERT OR IGNORE INTO users (email) VALUES (?)");
-  stmt.run(initialEmail);
-}
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  // Initialize Google Sheets
+  try {
+    await initializeSheet();
+    const initialEmail = process.env.INITIAL_ALLOWED_EMAIL;
+    if (initialEmail) {
+      await seedInitialUser(initialEmail);
+    }
+  } catch (error) {
+    console.error("Failed to initialize Google Sheets:", error);
+    process.exit(1);
+  }
+
   app.use(express.json());
 
   // API Routes
-  app.post("/api/auth/verify", (req, res) => {
+  app.post("/api/auth/verify", async (req, res) => {
     const { email } = req.body;
     if (!email) return res.status(400).json({ error: "Email is required" });
 
     try {
-      const user = db.prepare("SELECT * FROM users WHERE LOWER(email) = LOWER(?)").get(email) as any;
-      
+      const user = await getUserByEmail(email);
+
       if (!user) {
         return res.status(403).json({ error: "Email không có quyền truy cập!" });
       }
 
-      res.json({ 
-        success: true, 
+      res.json({
+        success: true,
         email: user.email,
-        requestCount: user.request_count
+        requestCount: user.request_count,
       });
     } catch (error: any) {
       console.error("Verification error:", error);
@@ -54,19 +58,19 @@ async function startServer() {
     }
   });
 
-  app.post("/api/usage/increment", (req, res) => {
+  app.post("/api/usage/increment", async (req, res) => {
     const { email } = req.body;
     if (!email) return res.status(400).json({ error: "Email is required" });
 
     try {
-      const result = db.prepare("UPDATE users SET request_count = request_count + 1 WHERE LOWER(email) = LOWER(?)").run(email);
-      
-      if (result.changes === 0) {
+      const user = await getUserByEmail(email);
+
+      if (!user) {
         return res.status(403).json({ error: "Email không tồn tại trong hệ thống" });
       }
 
-      const user = db.prepare("SELECT request_count FROM users WHERE LOWER(email) = LOWER(?)").get(email) as any;
-      res.json({ success: true, newCount: user.request_count });
+      const newCount = await updateRequestCount(email);
+      res.json({ success: true, newCount });
     } catch (error: any) {
       console.error("Increment error:", error);
       res.status(500).json({ error: "Lỗi khi cập nhật lượt dùng" });
@@ -82,16 +86,16 @@ async function startServer() {
   });
 
   // Admin route to list all users
-  app.post("/api/admin/list-users", (req, res) => {
+  app.post("/api/admin/list-users", async (req, res) => {
     const { adminEmail } = req.body;
     const initialEmail = process.env.INITIAL_ALLOWED_EMAIL;
-    
+
     if (!adminEmail || !initialEmail || adminEmail.toLowerCase() !== initialEmail.toLowerCase()) {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
     try {
-      const users = db.prepare("SELECT * FROM users ORDER BY request_count DESC").all();
+      const users = await getAllUsers();
       res.json({ users });
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch users" });
@@ -99,7 +103,7 @@ async function startServer() {
   });
 
   // Admin route to add users
-  app.post("/api/admin/add-user", (req, res) => {
+  app.post("/api/admin/add-user", async (req, res) => {
     const { email, adminEmail } = req.body;
     const initialEmail = process.env.INITIAL_ALLOWED_EMAIL;
 
@@ -108,7 +112,7 @@ async function startServer() {
     }
 
     try {
-      db.prepare("INSERT OR REPLACE INTO users (email) VALUES (?)").run(email);
+      await addUser(email);
       res.json({ success: true, message: `User ${email} added successfully` });
     } catch (error) {
       res.status(500).json({ error: "Failed to add user" });
@@ -116,7 +120,7 @@ async function startServer() {
   });
 
   // Admin route to delete user
-  app.post("/api/admin/delete-user", (req, res) => {
+  app.post("/api/admin/delete-user", async (req, res) => {
     const { email, adminEmail } = req.body;
     const initialEmail = process.env.INITIAL_ALLOWED_EMAIL;
 
@@ -129,7 +133,7 @@ async function startServer() {
     }
 
     try {
-      db.prepare("DELETE FROM users WHERE LOWER(email) = LOWER(?)").run(email);
+      await deleteUser(email);
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: "Failed to delete user" });
