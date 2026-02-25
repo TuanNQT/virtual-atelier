@@ -2,6 +2,16 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { Upload, X, Loader2 } from 'lucide-react';
 import { User } from '../../types';
 
+const TOKEN_KEY = 'auth_token';
+
+function getAuthHeaders(): Record<string, string> {
+  const token = localStorage.getItem(TOKEN_KEY);
+  return {
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+}
+
 interface AdminPageProps {
   adminEmail: string;
 }
@@ -14,10 +24,10 @@ export const AdminPage: React.FC<AdminPageProps> = ({ adminEmail }) => {
 
   const fetchUsers = useCallback(async () => {
     try {
+      // ✅ Đổi sang GET, không gửi adminEmail trong body nữa
       const res = await fetch('/api/admin/list-users', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ adminEmail }),
+        method: 'GET',
+        headers: getAuthHeaders(),
       });
       const data = await res.json();
       if (data.users) setUsers(data.users);
@@ -26,7 +36,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ adminEmail }) => {
     } finally {
       setIsLoading(false);
     }
-  }, [adminEmail]);
+  }, []);
 
   useEffect(() => {
     fetchUsers();
@@ -39,8 +49,9 @@ export const AdminPage: React.FC<AdminPageProps> = ({ adminEmail }) => {
     try {
       const res = await fetch('/api/admin/add-user', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: newEmail, adminEmail }),
+        headers: getAuthHeaders(),
+        // ✅ Không gửi adminEmail — server tự xác thực qua token
+        body: JSON.stringify({ email: newEmail }),
       });
       if (res.ok) {
         setNewEmail('');
@@ -49,7 +60,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ adminEmail }) => {
         const data = await res.json();
         alert(data.error || 'Lỗi khi thêm user');
       }
-    } catch (e) {
+    } catch {
       alert('Lỗi kết nối');
     } finally {
       setIsAdding(false);
@@ -61,8 +72,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({ adminEmail }) => {
     try {
       const res = await fetch('/api/admin/delete-user', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, adminEmail }),
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ email }),
       });
       if (res.ok) {
         fetchUsers();
@@ -70,7 +81,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ adminEmail }) => {
         const data = await res.json();
         alert(data.error || 'Lỗi khi xóa user');
       }
-    } catch (e) {
+    } catch {
       alert('Lỗi kết nối');
     }
   };
@@ -135,7 +146,9 @@ export const AdminPage: React.FC<AdminPageProps> = ({ adminEmail }) => {
                       </div>
                       <span className="text-sm font-medium">{user.email}</span>
                       {user.email.toLowerCase() === adminEmail.toLowerCase() && (
-                        <span className="px-2 py-0.5 bg-orange-100 text-orange-600 text-[8px] font-black uppercase tracking-widest rounded-full">Admin</span>
+                        <span className="px-2 py-0.5 bg-orange-100 text-orange-600 text-[8px] font-black uppercase tracking-widest rounded-full">
+                          Admin
+                        </span>
                       )}
                     </div>
                   </td>

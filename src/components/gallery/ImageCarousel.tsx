@@ -1,8 +1,8 @@
-import React from 'react';
-import { motion, AnimatePresence } from 'motion/react';
-import { X, ChevronLeft, ChevronRight, Download } from 'lucide-react';
-import { cn } from '../../lib/utils';
-import { GenerationResult, AspectRatio } from '../../types';
+import React from "react";
+import { motion, AnimatePresence } from "motion/react";
+import { X, ChevronLeft, ChevronRight, Download } from "lucide-react";
+import { cn } from "../../lib/utils";
+import { GenerationResult, AspectRatio } from "../../types";
 
 interface ImageCarouselProps {
   isOpen: boolean;
@@ -58,20 +58,22 @@ export const ImageCarousel: React.FC<ImageCarouselProps> = ({
 
           {/* Image Container */}
           <div className="relative w-full h-full flex items-center justify-center pointer-events-none">
-            <AnimatePresence mode="wait">
+            <AnimatePresence mode="popLayout">
               <motion.div
                 key={currentIndex}
                 initial={{ opacity: 0, scale: 0.9, y: 20 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.9, y: -20 }}
-                transition={{ type: "spring", stiffness: 260, damping: 26 }}
+                transition={{
+                  duration: 0.32,
+                }}
                 className={cn(
                   "relative max-w-full max-h-full pointer-events-auto shadow-[0_50px_100px_-20px_rgba(0,0,0,0.5)]",
-                  aspectRatio === '9:16' && "aspect-[9/16]",
-                  aspectRatio === '3:4' && "aspect-[3/4]",
-                  aspectRatio === '1:1' && "aspect-[1/1]",
-                  aspectRatio === '4:3' && "aspect-[4/3]",
-                  aspectRatio === '16:9' && "aspect-[16/9]"
+                  aspectRatio === "9:16" && "aspect-[9/16]",
+                  aspectRatio === "3:4" && "aspect-[3/4]",
+                  aspectRatio === "1:1" && "aspect-[1/1]",
+                  aspectRatio === "4:3" && "aspect-[4/3]",
+                  aspectRatio === "16:9" && "aspect-[16/9]",
                 )}
               >
                 <img
@@ -83,7 +85,8 @@ export const ImageCarousel: React.FC<ImageCarouselProps> = ({
                 {/* Action Bar in Modal */}
                 <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-4 px-6 py-2.5 bg-black/40 backdrop-blur-xl rounded-full border border-white/10 shadow-2xl">
                   <span className="text-white/50 text-[9px] font-black uppercase tracking-[0.2em] whitespace-nowrap">
-                    {currentIndex + 1} <span className="mx-1 opacity-20">/</span> {results.length}
+                    {currentIndex + 1}{" "}
+                    <span className="mx-1 opacity-20">/</span> {results.length}
                   </span>
                   <div className="w-px h-3 bg-white/10" />
                   <button

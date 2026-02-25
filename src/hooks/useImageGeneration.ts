@@ -1,8 +1,16 @@
 import { useState, useCallback, useEffect } from 'react';
-import { GoogleGenAI } from '@google/genai';
 import { useDropzone } from 'react-dropzone';
 import { GenerationResult, AspectRatio, Gender } from '../types';
 import { THEMES } from '../constants/config';
+
+const TOKEN_KEY = 'auth_token';
+
+function getAuthHeaders(): Record<string, string> {
+  const token = localStorage.getItem(TOKEN_KEY);
+  return token
+    ? { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
+    : { 'Content-Type': 'application/json' };
+}
 
 interface UseImageGenerationReturn {
   productImage: string | null;
@@ -14,10 +22,10 @@ interface UseImageGenerationReturn {
   selectedTheme: string;
   selectedAspectRatio: AspectRatio;
   description: string;
-  getProductProps: any;
-  getProductInput: any;
-  getModelProps: any;
-  getModelInput: any;
+  getProductProps: ReturnType<typeof useDropzone>['getRootProps'];
+  getProductInput: ReturnType<typeof useDropzone>['getInputProps'];
+  getModelProps: ReturnType<typeof useDropzone>['getRootProps'];
+  getModelInput: ReturnType<typeof useDropzone>['getInputProps'];
   isProductDrag: boolean;
   isModelDrag: boolean;
   setGender: (gender: Gender) => void;
@@ -62,135 +70,125 @@ export const useImageGeneration = (): UseImageGenerationReturn => {
   const { getRootProps: getProductProps, getInputProps: getProductInput, isDragActive: isProductDrag } = useDropzone({
     onDrop: onDropProduct,
     accept: { 'image/*': [] },
-    multiple: false
-  } as any);
+    multiple: false,
+  } as Parameters<typeof useDropzone>[0]);
 
   const { getRootProps: getModelProps, getInputProps: getModelInput, isDragActive: isModelDrag } = useDropzone({
     onDrop: onDropModel,
     accept: { 'image/*': [] },
-    multiple: false
-  } as any);
+    multiple: false,
+  } as Parameters<typeof useDropzone>[0]);
 
-  const generateWithRetry = useCallback(async (partIndex: number, retryCount = 0): Promise<GenerationResult | null> => {
-    try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      const themeLabel = THEMES.find(t => t.id === selectedTheme)?.label;
+  // ── Gọi server thay vì gọi Gemini trực tiếp ──────────────────────────────
+  const generateSingle = useCallback(
+    async (variationIndex: number, retryCount = 0): Promise<GenerationResult | null> => {
+      const themeLabel = THEMES.find((t) => t.id === selectedTheme)?.label;
 
-      const basePrompt = `A high-quality, professional fashion photograph of a ${gender === 'female' ? 'female' : 'male'} Vietnamese model, approximately 20 years old, looking young and energetic.
-        The model is holding an iPhone 16 Pro Max and taking a selfie in front of a mirror.
-        The model is wearing the exact clothing shown in the provided product image.
-        ${gender === 'female'
-          ? 'The model has long flowing hair, a beautiful tall physique with balanced curves.'
-          : 'The model has a stylish side part hairstyle, a fit tall physique with 6-pack abs and broad shoulders.'}
-        The setting is a ${themeLabel} environment.
-        ${description ? `Additional context: ${description}` : ''}
-        The output must be a realistic, high-resolution image with a ${selectedAspectRatio} aspect ratio.`;
+      try {
+        const response = await fetch('/api/generate', {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({
+            productImageBase64: productImage!.split(',')[1],
+            modelImageBase64: modelImage ? modelImage.split(',')[1] : null,
+            gender,
+            themeLabel,
+            selectedAspectRatio,
+            description,
+            variationIndex,
+          }),
+        });
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash-image',
-        contents: {
-          parts: [
-            {
-              inlineData: {
-                data: productImage!.split(',')[1],
-                mimeType: 'image/png',
-              },
-            },
-            ...(modelImage ? [{
-              inlineData: {
-                data: modelImage.split(',')[1],
-                mimeType: 'image/png',
-              },
-            }] : []),
-            { text: `${basePrompt} (Variation ${partIndex + 1})` },
-          ],
-        },
-        config: {
-          imageConfig: {
-            aspectRatio: selectedAspectRatio as any,
-          },
-        },
-      });
+        if (response.status === 429) {
+          if (retryCount < 3) {
+            const delay = Math.pow(2, retryCount) * 2000;
+            await new Promise((r) => setTimeout(r, delay));
+            return generateSingle(variationIndex, retryCount + 1);
+          }
+          throw new Error('QUOTA_EXHAUSTED');
+        }
 
-      const part = response.candidates[0].content.parts.find(p => p.inlineData);
-      if (part?.inlineData) {
+        if (!response.ok) {
+          const err = await response.json().catch(() => ({}));
+          throw new Error(err.error || 'Lỗi server');
+        }
+
+        const data = await response.json();
         return {
           id: Math.random().toString(36).substr(2, 9),
-          url: `data:image/png;base64,${part.inlineData.data}`
+          url: `data:image/png;base64,${data.imageBase64}`,
         };
+      } catch (error) {
+        throw error;
       }
-      return null;
-    } catch (error: any) {
-      if (error.message?.includes('429') || error.status === 429) {
-        if (retryCount < 3) {
-          const delay = Math.pow(2, retryCount) * 2000;
-          console.log(`Rate limited. Retrying in ${delay}ms...`);
-          await new Promise(resolve => setTimeout(resolve, delay));
-          return generateWithRetry(partIndex, retryCount + 1);
-        }
-        throw new Error('QUOTA_EXHAUSTED');
-      }
-      throw error;
-    }
-  }, [gender, selectedTheme, selectedAspectRatio, description, productImage, modelImage]);
+    },
+    [gender, selectedTheme, selectedAspectRatio, description, productImage, modelImage]
+  );
 
-  const handleGenerate = useCallback(async (userEmail: string | null) => {
-    if (!userEmail) {
-      alert('Vui lòng đăng nhập để sử dụng!');
-      return;
-    }
-
-    if (!productImage) {
-      alert('Vui lòng tải lên ảnh sản phẩm!');
-      return;
-    }
-
-    if (!window.aistudio && window.aistudio) {
-      const confirm = window.confirm('Bạn cần chọn API Key trả phí để tránh giới hạn lượt dùng. Bạn có muốn chọn ngay không?');
-      if (confirm) {
-        await window.aistudio?.openSelectKey();
+  const handleGenerate = useCallback(
+    async (userEmail: string | null) => {
+      if (!userEmail) {
+        alert('Vui lòng đăng nhập để sử dụng!');
         return;
       }
-    }
+      if (!productImage) {
+        alert('Vui lòng tải lên ảnh sản phẩm!');
+        return;
+      }
 
-    setIsGenerating(true);
-    setResults([]);
-
-    try {
-      const newResults: GenerationResult[] = [];
-
-      // Generate 4 results with sequential retries
-      for (let i = 0; i < 4; i++) {
-        const result = await generateWithRetry(i);
-        if (result) {
-          newResults.push(result);
-          setResults(prev => [...prev, result]);
+      // ✅ Fix logic check API key (was: !window.aistudio && window.aistudio — never true)
+      if (window.aistudio) {
+        const hasKey = await window.aistudio.hasSelectedApiKey();
+        if (!hasKey) {
+          const confirmed = window.confirm(
+            'Bạn chưa chọn API Key trả phí. Bạn có muốn chọn ngay không?'
+          );
+          if (confirmed) {
+            await window.aistudio.openSelectKey();
+            return;
+          }
         }
       }
-    } catch (error: any) {
-      console.error('Generation failed:', error);
-      if (error.message === 'QUOTA_EXHAUSTED') {
-        alert('Bạn đã hết hạn mức sử dụng (429). Vui lòng đợi một lát hoặc kết nối API Key trả phí của riêng bạn trong phần cài đặt.');
-      } else {
-        alert('Đã có lỗi xảy ra trong quá trình tạo ảnh. Vui lòng thử lại.');
-      }
-    } finally {
-      setIsGenerating(false);
 
-      // Increment usage
-      if (userEmail) {
-        try {
-          await fetch('/api/usage/increment', {
+      setIsGenerating(true);
+      setResults([]);
+
+      let successCount = 0;
+
+      try {
+        // ✅ Generate 4 ảnh SONG SONG thay vì tuần tự — nhanh ~4x
+        const promises = [0, 1, 2, 3].map((i) =>
+          generateSingle(i).then((result) => {
+            if (result) {
+              setResults((prev) => [...prev, result]);
+              successCount++;
+            }
+            return result;
+          })
+        );
+
+        await Promise.allSettled(promises);
+      } catch (error: any) {
+        console.error('Generation failed:', error);
+        if (error.message === 'QUOTA_EXHAUSTED') {
+          alert('Bạn đã hết hạn mức sử dụng (429). Vui lòng đợi một lát hoặc kết nối API Key trả phí.');
+        } else {
+          alert('Đã có lỗi xảy ra trong quá trình tạo ảnh. Vui lòng thử lại.');
+        }
+      } finally {
+        setIsGenerating(false);
+
+        // ✅ Chỉ tăng usage khi có ít nhất 1 ảnh thành công
+        if (successCount > 0) {
+          fetch('/api/usage/increment', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email: userEmail }),
-          });
-        } catch (e) {
-          console.error('Failed to increment usage', e);
+            headers: getAuthHeaders(),
+          }).catch((e) => console.error('Failed to increment usage', e));
         }
       }
-    }
-  }, [productImage, generateWithRetry]);
+    },
+    [productImage, generateSingle]
+  );
 
   const downloadImage = useCallback((url: string, id: string) => {
     const link = document.createElement('a');
@@ -202,34 +200,23 @@ export const useImageGeneration = (): UseImageGenerationReturn => {
   }, []);
 
   const nextImage = useCallback(() => {
-    if (zoomedIndex !== null) {
-      setZoomedIndex((zoomedIndex + 1) % results.length);
-    }
+    if (zoomedIndex !== null) setZoomedIndex((zoomedIndex + 1) % results.length);
   }, [zoomedIndex, results.length]);
 
   const prevImage = useCallback(() => {
-    if (zoomedIndex !== null) {
-      setZoomedIndex((zoomedIndex - 1 + results.length) % results.length);
-    }
+    if (zoomedIndex !== null) setZoomedIndex((zoomedIndex - 1 + results.length) % results.length);
   }, [zoomedIndex, results.length]);
 
-  // Keyboard navigation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (zoomedIndex === null) return;
-
-      if (e.key === 'ArrowRight') {
-        nextImage();
-      } else if (e.key === 'ArrowLeft') {
-        prevImage();
-      } else if (e.key === 'Escape') {
-        setZoomedIndex(null);
-      }
+      if (e.key === 'ArrowRight') nextImage();
+      else if (e.key === 'ArrowLeft') prevImage();
+      else if (e.key === 'Escape') setZoomedIndex(null);
     };
-
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [zoomedIndex, results.length, nextImage, prevImage]);
+  }, [zoomedIndex, nextImage, prevImage]);
 
   return {
     productImage,

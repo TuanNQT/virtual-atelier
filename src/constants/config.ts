@@ -22,3 +22,6 @@ export const ASPECT_RATIOS = [
   { id: '4:3', label: '4:3', icon: '🖼️' },
   { id: '16:9', label: '16:9', icon: '📺' },
 ];
+
+// ✅ Gemini model name — đổi 1 chỗ duy nhất khi cần upgrade
+export const GEMINI_MODEL = 'gemini-2.5-flash-image';

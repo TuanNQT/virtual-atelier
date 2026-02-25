@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 
+const TOKEN_KEY = 'auth_token';
+
 interface UseAdminReturn {
   isAdmin: boolean;
   currentView: 'home' | 'admin';
@@ -12,24 +14,20 @@ export const useAdmin = (userEmail: string | null): UseAdminReturn => {
 
   useEffect(() => {
     const checkAdmin = async () => {
-      if (userEmail) {
-        try {
-          const res = await fetch('/api/admin/check', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email: userEmail }),
-          });
-          const data = await res.json();
-          setIsAdmin(data.isAdmin);
-          if (!data.isAdmin) {
-            setCurrentView('home');
-          }
-        } catch (e) {
-          console.error('Admin check failed', e);
-          setIsAdmin(false);
-          setCurrentView('home');
-        }
-      } else {
+      if (!userEmail) {
+        setIsAdmin(false);
+        setCurrentView('home');
+        return;
+      }
+      try {
+        const token = localStorage.getItem(TOKEN_KEY);
+        const res = await fetch('/api/admin/check', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const data = await res.json();
+        setIsAdmin(data.isAdmin ?? false);
+        if (!data.isAdmin) setCurrentView('home');
+      } catch {
         setIsAdmin(false);
         setCurrentView('home');
       }

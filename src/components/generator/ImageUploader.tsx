@@ -1,14 +1,15 @@
 import React from 'react';
 import { Upload, User, X } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { DropzoneRootProps, DropzoneInputProps } from '../../types';
 
 interface ImageUploaderProps {
   label: string;
   image: string | null;
   isDragging: boolean;
   isModel?: boolean;
-  onDrop: any;
-  onInput: any;
+  onDrop: DropzoneRootProps;
+  onInput: DropzoneInputProps;
   onRemove: () => void;
 }
 
@@ -25,18 +26,15 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
 
   return (
     <div className="space-y-3">
-      <label className={cn(
-        "text-[10px] font-bold uppercase tracking-widest opacity-40",
-        isModel && "tracking-widest"
-      )}>
+      <label className={cn('text-[10px] font-bold uppercase tracking-widest opacity-40', isModel && 'tracking-widest')}>
         {label}
       </label>
       <div
         {...onDrop}
         className={cn(
-          "relative aspect-[4/5] rounded-[2rem] border border-black/5 bg-white transition-all cursor-pointer overflow-hidden group shadow-sm",
-          isDragging ? "ring-2 ring-orange-500/20 bg-orange-50/10" : "hover:shadow-xl hover:shadow-black/5 hover:-translate-y-1",
-          image ? "border-transparent" : "border-dashed border-black/10"
+          'relative aspect-[4/5] rounded-[2rem] border border-black/5 bg-white transition-all cursor-pointer overflow-hidden group shadow-sm',
+          isDragging ? 'ring-2 ring-orange-500/20 bg-orange-50/10' : 'hover:shadow-xl hover:shadow-black/5 hover:-translate-y-1',
+          image ? 'border-transparent' : 'border-dashed border-black/10'
         )}
       >
         <input {...onInput} />
@@ -45,7 +43,10 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({
             <img src={image} alt={label} className="w-full h-full object-cover" />
             <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
               <div className="bg-white/90 backdrop-blur-md p-2 rounded-full shadow-xl">
-                <X className="w-4 h-4 text-black" onClick={(e) => { e.stopPropagation(); onRemove(); }} />
+                <X
+                  className="w-4 h-4 text-black"
+                  onClick={(e) => { e.stopPropagation(); onRemove(); }}
+                />
               </div>
             </div>
           </>

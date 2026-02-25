@@ -1,19 +1,26 @@
-import { google } from 'googleapis';
+import { google, sheets_v4 } from 'googleapis';
 import { JWT } from 'google-auth-library';
 
-const SHEET_ID = process.env.GOOGLE_SHEETS_ID || '1yen7RPq2d-IJqRVdBscLiGJaLg-ihtC2RUddMH5mBTg';
+// Đọc env lúc runtime, không phải lúc module load
+// => dotenv.config() đã chạy trước khi module này được import động
+function getSheetId(): string {
+  const id = process.env.GOOGLE_SHEETS_ID;
+  if (!id) throw new Error('GOOGLE_SHEETS_ID environment variable is required');
+  return id;
+}
+
 const SHEET_NAME = process.env.GOOGLE_SHEETS_NAME || 'Virtual Atelier';
 
-let sheetsClient: any = null;
+let sheetsClient: sheets_v4.Sheets | null = null;
 let authClient: JWT | null = null;
 
-// Initialize Google Sheets API client
-async function initializeClient() {
+async function initializeClient(): Promise<JWT> {
   if (authClient) return authClient;
 
-  const credentials = JSON.parse(
-    Buffer.from(process.env.GOOGLE_SHEETS_CREDENTIALS || '', 'base64').toString('utf-8')
-  );
+  const rawCreds = process.env.GOOGLE_SHEETS_CREDENTIALS;
+  if (!rawCreds) throw new Error('GOOGLE_SHEETS_CREDENTIALS environment variable is required');
+
+  const credentials = JSON.parse(Buffer.from(rawCreds, 'base64').toString('utf-8'));
 
   authClient = new google.auth.JWT({
     email: credentials.client_email,
@@ -24,16 +31,20 @@ async function initializeClient() {
   return authClient;
 }
 
-// Get Sheets API client
-function getSheetsClient(auth: JWT) {
+function getSheetsClient(auth: JWT): sheets_v4.Sheets {
   if (!sheetsClient) {
     sheetsClient = google.sheets({ version: 'v4', auth });
   }
   return sheetsClient;
 }
 
-// Initialize sheet with headers if needed
-async function initializeSheet() {
+export interface SheetUser {
+  email: string;
+  request_count: number;
+}
+
+export async function initializeSheet(): Promise<void> {
+  const SHEET_ID = getSheetId();
   const auth = await initializeClient();
   const sheets = getSheetsClient(auth);
 
@@ -44,14 +55,11 @@ async function initializeSheet() {
     });
 
     if (!response.data.values || response.data.values.length === 0) {
-      // Add headers
       await sheets.spreadsheets.values.update({
         spreadsheetId: SHEET_ID,
         range: `${SHEET_NAME}!A1:B1`,
         valueInputOption: 'RAW',
-        requestBody: {
-          values: [['email', 'request_count']],
-        },
+        requestBody: { values: [['email', 'request_count']] },
       });
     }
   } catch (error) {
@@ -60,8 +68,8 @@ async function initializeSheet() {
   }
 }
 
-// Get user by email
-async function getUserByEmail(email: string): Promise<any | null> {
+export async function getUserByEmail(email: string): Promise<SheetUser | null> {
+  const SHEET_ID = getSheetId();
   const auth = await initializeClient();
   const sheets = getSheetsClient(auth);
 
@@ -71,16 +79,11 @@ async function getUserByEmail(email: string): Promise<any | null> {
       range: `${SHEET_NAME}!A2:B`,
     });
 
-    const rows = response.data.values || [];
-    const user = rows.find(
-      (row: any[]) => row[0] && row[0].toLowerCase() === email.toLowerCase()
-    );
+    const rows: string[][] = (response.data.values as string[][]) || [];
+    const user = rows.find((row) => row[0] && row[0].toLowerCase() === email.toLowerCase());
 
     if (user) {
-      return {
-        email: user[0],
-        request_count: parseInt(user[1]) || 0,
-      };
+      return { email: user[0], request_count: parseInt(user[1]) || 0 };
     }
     return null;
   } catch (error) {
@@ -89,26 +92,20 @@ async function getUserByEmail(email: string): Promise<any | null> {
   }
 }
 
-// Add new user
-async function addUser(email: string) {
+export async function addUser(email: string): Promise<SheetUser> {
+  const SHEET_ID = getSheetId();
   const auth = await initializeClient();
   const sheets = getSheetsClient(auth);
 
-  try {
-    // Check if user already exists
-    const existing = await getUserByEmail(email);
-    if (existing) {
-      return existing;
-    }
+  const existing = await getUserByEmail(email);
+  if (existing) return existing;
 
-    // Append new user
-    const response = await sheets.spreadsheets.values.append({
+  try {
+    await sheets.spreadsheets.values.append({
       spreadsheetId: SHEET_ID,
       range: `${SHEET_NAME}!A2`,
       valueInputOption: 'RAW',
-      requestBody: {
-        values: [[email, 0]],
-      },
+      requestBody: { values: [[email, 0]] },
     });
 
     return { email, request_count: 0 };
@@ -118,42 +115,29 @@ async function addUser(email: string) {
   }
 }
 
-// Update request count (increment)
-async function updateRequestCount(email: string): Promise<number> {
+export async function updateRequestCount(email: string): Promise<number> {
+  const SHEET_ID = getSheetId();
   const auth = await initializeClient();
   const sheets = getSheetsClient(auth);
 
   try {
-    const user = await getUserByEmail(email);
-    if (!user) {
-      throw new Error('User not found');
-    }
-
-    const newCount = (user.request_count || 0) + 1;
-
-    // Get all data to find row number
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: SHEET_ID,
       range: `${SHEET_NAME}!A2:B`,
     });
 
-    const rows = response.data.values || [];
-    const rowIndex = rows.findIndex(
-      (row: any[]) => row[0] && row[0].toLowerCase() === email.toLowerCase()
-    );
+    const rows: string[][] = (response.data.values as string[][]) || [];
+    const rowIndex = rows.findIndex((row) => row[0] && row[0].toLowerCase() === email.toLowerCase());
 
-    if (rowIndex === -1) {
-      throw new Error('User not found');
-    }
+    if (rowIndex === -1) throw new Error('User not found');
 
-    // Update the count
+    const newCount = (parseInt(rows[rowIndex][1]) || 0) + 1;
+
     await sheets.spreadsheets.values.update({
       spreadsheetId: SHEET_ID,
       range: `${SHEET_NAME}!B${rowIndex + 2}`,
       valueInputOption: 'RAW',
-      requestBody: {
-        values: [[newCount]],
-      },
+      requestBody: { values: [[newCount]] },
     });
 
     return newCount;
@@ -163,8 +147,8 @@ async function updateRequestCount(email: string): Promise<number> {
   }
 }
 
-// Get all users
-async function getAllUsers(): Promise<any[]> {
+export async function getAllUsers(): Promise<SheetUser[]> {
+  const SHEET_ID = getSheetId();
   const auth = await initializeClient();
   const sheets = getSheetsClient(auth);
 
@@ -174,21 +158,19 @@ async function getAllUsers(): Promise<any[]> {
       range: `${SHEET_NAME}!A2:B`,
     });
 
-    const rows = response.data.values || [];
+    const rows: string[][] = (response.data.values as string[][]) || [];
     return rows
-      .map((row: any[]) => ({
-        email: row[0],
-        request_count: parseInt(row[1]) || 0,
-      }))
-      .sort((a: any, b: any) => b.request_count - a.request_count);
+      .filter((row) => row[0])
+      .map((row) => ({ email: row[0], request_count: parseInt(row[1]) || 0 }))
+      .sort((a, b) => b.request_count - a.request_count);
   } catch (error) {
     console.error('Error getting all users:', error);
     throw error;
   }
 }
 
-// Delete user by email
-async function deleteUser(email: string) {
+export async function deleteUser(email: string): Promise<void> {
+  const SHEET_ID = getSheetId();
   const auth = await initializeClient();
   const sheets = getSheetsClient(auth);
 
@@ -198,31 +180,19 @@ async function deleteUser(email: string) {
       range: `${SHEET_NAME}!A2:B`,
     });
 
-    const rows = response.data.values || [];
-    const rowIndex = rows.findIndex(
-      (row: any[]) => row[0] && row[0].toLowerCase() === email.toLowerCase()
-    );
+    const rows: string[][] = (response.data.values as string[][]) || [];
+    const rowIndex = rows.findIndex((row) => row[0] && row[0].toLowerCase() === email.toLowerCase());
 
-    if (rowIndex === -1) {
-      throw new Error('User not found');
-    }
+    if (rowIndex === -1) throw new Error('User not found');
 
-    // Delete row using batchUpdate
     await sheets.spreadsheets.batchUpdate({
       spreadsheetId: SHEET_ID,
       requestBody: {
-        requests: [
-          {
-            deleteDimension: {
-              range: {
-                sheetId: 0,
-                dimension: 'ROWS',
-                startIndex: rowIndex + 1,
-                endIndex: rowIndex + 2,
-              },
-            },
+        requests: [{
+          deleteDimension: {
+            range: { sheetId: 0, dimension: 'ROWS', startIndex: rowIndex + 1, endIndex: rowIndex + 2 },
           },
-        ],
+        }],
       },
     });
   } catch (error) {
@@ -231,24 +201,11 @@ async function deleteUser(email: string) {
   }
 }
 
-// Seed initial user
-async function seedInitialUser(email: string) {
+export async function seedInitialUser(email: string): Promise<void> {
   try {
     const existing = await getUserByEmail(email);
-    if (!existing) {
-      await addUser(email);
-    }
+    if (!existing) await addUser(email);
   } catch (error) {
     console.error('Error seeding initial user:', error);
   }
 }
-
-export {
-  initializeSheet,
-  getUserByEmail,
-  addUser,
-  updateRequestCount,
-  getAllUsers,
-  deleteUser,
-  seedInitialUser,
-};
