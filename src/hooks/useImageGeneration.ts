@@ -10,9 +10,6 @@ import {
 import { THEMES, POSES } from "../constants/config";
 
 const TOKEN_KEY = "auth_token";
-const HISTORY_KEY = "va_history";
-/** Lưu tối đa 10 kết quả gần nhất (mỗi kết quả = 1 session gồm product, model, 4 ảnh). Chỉ lưu URL ImageKit nên không lo quá tải localStorage. */
-const MAX_HISTORY_SESSIONS = 10;
 
 function getAuthHeaders(): Record<string, string> {
   const token = localStorage.getItem(TOKEN_KEY);
@@ -88,21 +85,47 @@ export const useImageGeneration = (): UseImageGenerationReturn => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [results, setResults] = useState<GenerationResult[]>([]);
   const [zoomedIndex, setZoomedIndex] = useState<number | null>(null);
-  const [history, setHistory] = useState<GenerationSession[]>(() => {
-    try {
-      return JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]");
-    } catch {
-      return [];
-    }
-  });
+  const [history, setHistory] = useState<GenerationSession[]>([]);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
 
+  // Fetch history từ server khi mount
   useEffect(() => {
-    try {
-      localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
-    } catch (e) {
-      console.warn("Không thể lưu lịch sử vào localStorage:", e);
-    }
-  }, [history]);
+    const token = localStorage.getItem(TOKEN_KEY);
+    if (!token || historyLoaded) return;
+    fetch("/api/history", {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+    })
+      .then(async (r) => {
+        const text = await r.text();
+        if (!r.ok) return null;
+        try {
+          return JSON.parse(text);
+        } catch {
+          return null;
+        }
+      })
+      .then((data) => {
+        if (data?.sessions) {
+          setHistory(
+            data.sessions.map((s: any) => ({
+              id: s.session_id,
+              timestamp: s.timestamp,
+              results: s.results,
+              theme: s.theme,
+              gender: s.gender,
+              aspectRatio: s.aspectRatio,
+              productImageUrl: s.productImageUrl || undefined,
+              modelImageUrl: s.modelImageUrl || undefined,
+            })),
+          );
+        }
+      })
+      .catch((err) => console.error("[history GET] fetch error:", err))
+      .finally(() => setHistoryLoaded(true));
+  }, [historyLoaded]);
 
   const onDropProduct = useCallback((files: File[]) => {
     const r = new FileReader();
@@ -283,21 +306,42 @@ export const useImageGeneration = (): UseImageGenerationReturn => {
                 url: urls[i],
               }),
             );
-            setHistory((prev) =>
-              [
-                {
-                  id: Date.now().toString(),
-                  timestamp: Date.now(),
-                  results: resultsWithUrls,
-                  theme: selectedTheme,
-                  gender,
-                  aspectRatio: selectedAspectRatio,
-                  productImageUrl,
-                  modelImageUrl: modelImageUrl ?? undefined,
-                },
-                ...prev,
-              ].slice(0, MAX_HISTORY_SESSIONS),
-            );
+            const newSession: GenerationSession = {
+              id: Date.now().toString(),
+              timestamp: Date.now(),
+              results: resultsWithUrls,
+              theme: selectedTheme,
+              gender,
+              aspectRatio: selectedAspectRatio,
+              productImageUrl,
+              modelImageUrl: modelImageUrl ?? undefined,
+            };
+            // Lưu lên Google Sheets
+            fetch("/api/history", {
+              method: "POST",
+              headers: getAuthHeaders(),
+              body: JSON.stringify({
+                session_id: newSession.id,
+                timestamp: newSession.timestamp,
+                theme: newSession.theme,
+                gender: newSession.gender,
+                aspectRatio: newSession.aspectRatio,
+                productImageUrl: newSession.productImageUrl,
+                modelImageUrl: newSession.modelImageUrl,
+                results: newSession.results.map((r) => ({
+                  id: r.id,
+                  url: r.url,
+                })),
+              }),
+            })
+              .then(async (r) => {
+                const text = await r.text();
+              })
+              .catch((err) =>
+                console.error("[history POST] fetch error:", err),
+              );
+            // Cập nhật state local
+            setHistory((prev) => [newSession, ...prev].slice(0, 10));
           } catch {
             // ImageKit fail — không lưu history, app vẫn chạy bình thường
             console.log("Save history failed");
@@ -366,7 +410,10 @@ export const useImageGeneration = (): UseImageGenerationReturn => {
   }, []);
   const clearHistory = useCallback(() => {
     setHistory([]);
-    localStorage.removeItem(HISTORY_KEY);
+    fetch("/api/history", {
+      method: "DELETE",
+      headers: getAuthHeaders(),
+    }).catch(() => {});
   }, []);
 
   const nextImage = useCallback(() => {

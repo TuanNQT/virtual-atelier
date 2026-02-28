@@ -121,11 +121,16 @@ async function startServer() {
     getAllUsers,
     deleteUser,
     seedInitialUser,
+    initializeHistorySheet,
+    saveHistorySession,
+    getHistorySessions,
+    clearUserHistory,
   } = await import("./lib/googleSheets.js");
 
   // Google Sheets init
   try {
     await initializeSheet();
+    await initializeHistorySheet();
     const initialEmail = process.env.INITIAL_ALLOWED_EMAIL;
     if (initialEmail) await seedInitialUser(initialEmail);
   } catch (error) {
@@ -400,6 +405,62 @@ The output must be a realistic, high-resolution image with a ${selectedAspectRat
       res.json({ success: true });
     } catch {
       res.status(500).json({ error: "Failed to delete user" });
+    }
+  });
+
+  // ── History (Google Sheets) ───────────────────────────────────────────────
+  app.get("/api/history", requireAuth, async (req, res) => {
+    const email = ((req as any).session as Session).email;
+    try {
+      const sessions = await getHistorySessions(email);
+      res.json({ sessions });
+    } catch (err) {
+      console.error("[history GET]", err);
+      res.status(500).json({ error: "Không thể lấy lịch sử" });
+    }
+  });
+
+  app.post("/api/history", requireAuth, async (req, res) => {
+    const email = ((req as any).session as Session).email;
+    const {
+      session_id,
+      timestamp,
+      theme,
+      gender,
+      aspectRatio,
+      productImageUrl,
+      modelImageUrl,
+      results,
+    } = req.body;
+    if (!session_id || !results)
+      return res.status(400).json({ error: "Thiếu dữ liệu" });
+    try {
+      await saveHistorySession({
+        session_id,
+        email,
+        timestamp,
+        theme,
+        gender,
+        aspectRatio,
+        productImageUrl,
+        modelImageUrl,
+        results,
+      });
+      res.json({ success: true });
+    } catch (err) {
+      console.error("[history POST]", err);
+      res.status(500).json({ error: "Không thể lưu lịch sử" });
+    }
+  });
+
+  app.delete("/api/history", requireAuth, async (req, res) => {
+    const email = ((req as any).session as Session).email;
+    try {
+      await clearUserHistory(email);
+      res.json({ success: true });
+    } catch (err) {
+      console.error("[history DELETE]", err);
+      res.status(500).json({ error: "Không thể xóa lịch sử" });
     }
   });
 
