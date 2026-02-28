@@ -1,17 +1,25 @@
-import React, { useEffect, useState } from 'react';
-import { useAuth } from './hooks/useAuth';
-import { useImageGeneration } from './hooks/useImageGeneration';
-import { useAdmin } from './hooks/useAdmin';
-import { LoginForm } from './components/auth/LoginForm';
-import { Header } from './components/layout/Header';
-import { Footer } from './components/layout/Footer';
-import { ControlPanel } from './components/generator/ControlPanel';
-import { ResultsGallery } from './components/gallery/ResultsGallery';
-import { ImageCarousel } from './components/gallery/ImageCarousel';
-import { AdminPage } from './components/admin/AdminPage';
+import React, { useEffect, useState } from "react";
+import { useAuth } from "./hooks/useAuth";
+import { useImageGeneration } from "./hooks/useImageGeneration";
+import { useAdmin } from "./hooks/useAdmin";
+import { LoginForm } from "./components/auth/LoginForm";
+import { Header } from "./components/layout/Header";
+import { Footer } from "./components/layout/Footer";
+import { ControlPanel } from "./components/generator/ControlPanel";
+import { ResultsGallery } from "./components/gallery/ResultsGallery";
+import { ImageCarousel } from "./components/gallery/ImageCarousel";
+import { AdminPage } from "./components/admin/AdminPage";
 
 export default function App() {
-  const { userEmail, isVerifying, authError, emailInput, setEmailInput, handleVerifyEmail, handleLogout } = useAuth();
+  const {
+    userEmail,
+    isVerifying,
+    authError,
+    emailInput,
+    setEmailInput,
+    handleVerifyEmail,
+    handleLogout,
+  } = useAuth();
   const imageGeneration = useImageGeneration();
   const { isAdmin, currentView, setCurrentView } = useAdmin(userEmail);
   const [hasApiKey, setHasApiKey] = useState<boolean>(true);
@@ -61,7 +69,7 @@ export default function App() {
       />
 
       <main className="max-w-7xl mx-auto px-8 py-16">
-        {currentView === 'admin' && isAdmin ? (
+        {currentView === "admin" && isAdmin ? (
           <AdminPage adminEmail={userEmail} />
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-20">
@@ -81,6 +89,10 @@ export default function App() {
               isModelDrag={imageGeneration.isModelDrag}
               onProductRemove={() => imageGeneration.setProductImage(null)}
               onModelRemove={() => imageGeneration.setModelImage(null)}
+              onProductPaste={(dataUrl) =>
+                imageGeneration.setProductImage(dataUrl)
+              }
+              onModelPaste={(dataUrl) => imageGeneration.setModelImage(dataUrl)}
               onGenderChange={imageGeneration.setGender}
               onThemeChange={imageGeneration.setSelectedTheme}
               onAspectRatioChange={imageGeneration.setSelectedAspectRatio}
@@ -113,7 +125,7 @@ export default function App() {
           if (imageGeneration.zoomedIndex !== null) {
             imageGeneration.downloadImage(
               imageGeneration.results[imageGeneration.zoomedIndex].url,
-              imageGeneration.results[imageGeneration.zoomedIndex].id
+              imageGeneration.results[imageGeneration.zoomedIndex].id,
             );
           }
         }}

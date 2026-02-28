@@ -1,11 +1,16 @@
-import React from 'react';
-import { Loader2, Sparkles } from 'lucide-react';
-import { cn } from '../../lib/utils';
-import { Gender, AspectRatio, DropzoneRootProps, DropzoneInputProps } from '../../types';
-import { ImageUploader } from './ImageUploader';
-import { GenderSelector } from './GenderSelector';
-import { ThemeSelector } from './ThemeSelector';
-import { AspectRatioSelector } from './AspectRatioSelector';
+import React from "react";
+import { Loader2, Sparkles } from "lucide-react";
+import { cn } from "../../lib/utils";
+import {
+  Gender,
+  AspectRatio,
+  DropzoneRootProps,
+  DropzoneInputProps,
+} from "../../types";
+import { ImageUploader } from "./ImageUploader";
+import { GenderSelector } from "./GenderSelector";
+import { ThemeSelector } from "./ThemeSelector";
+import { AspectRatioSelector } from "./AspectRatioSelector";
 
 interface ControlPanelProps {
   productImage: string | null;
@@ -23,6 +28,8 @@ interface ControlPanelProps {
   isModelDrag: boolean;
   onProductRemove: () => void;
   onModelRemove: () => void;
+  onProductPaste: (dataUrl: string) => void;
+  onModelPaste: (dataUrl: string) => void;
   onGenderChange: (gender: Gender) => void;
   onThemeChange: (theme: string) => void;
   onAspectRatioChange: (ratio: AspectRatio) => void;
@@ -46,6 +53,8 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
   isModelDrag,
   onProductRemove,
   onModelRemove,
+  onProductPaste,
+  onModelPaste,
   onGenderChange,
   onThemeChange,
   onAspectRatioChange,
@@ -57,8 +66,12 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
       {/* Section 1: Uploads */}
       <section className="space-y-6">
         <div className="flex items-center gap-3">
-          <span className="text-[11px] font-mono text-black/35 bg-black/5 w-6 h-6 flex items-center justify-center rounded-full">01</span>
-          <h2 className="text-sm font-bold uppercase tracking-[0.25em] text-black/75">Tải ảnh lên</h2>
+          <span className="text-[11px] font-mono text-black/35 bg-black/5 w-6 h-6 flex items-center justify-center rounded-full">
+            01
+          </span>
+          <h2 className="text-sm font-bold uppercase tracking-[0.25em] text-black/75">
+            Tải ảnh lên
+          </h2>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
@@ -69,6 +82,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
             onDrop={onProductDrop}
             onInput={onProductInput}
             onRemove={onProductRemove}
+            onPaste={onProductPaste}
           />
           <ImageUploader
             label="Ảnh người mẫu (Tùy chọn)"
@@ -78,26 +92,41 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
             onDrop={onModelDrop}
             onInput={onModelInput}
             onRemove={onModelRemove}
+            onPaste={onModelPaste}
           />
         </div>
 
         <div className="space-y-3 pt-2">
-          <label className="text-xs font-bold uppercase tracking-widest text-black/55 block">Giới tính người mẫu</label>
-          <GenderSelector selectedGender={gender} onGenderChange={onGenderChange} />
+          <label className="text-xs font-bold uppercase tracking-widest text-black/55 block">
+            Giới tính người mẫu
+          </label>
+          <GenderSelector
+            selectedGender={gender}
+            onGenderChange={onGenderChange}
+          />
         </div>
       </section>
 
       {/* Section 2: Themes & Description */}
       <section className="space-y-8">
         <div className="flex items-center gap-3">
-          <span className="text-[11px] font-mono text-black/35 bg-black/5 w-6 h-6 flex items-center justify-center rounded-full">02</span>
-          <h2 className="text-sm font-bold uppercase tracking-[0.25em] text-black/75">Chủ đề & Mô tả</h2>
+          <span className="text-[11px] font-mono text-black/35 bg-black/5 w-6 h-6 flex items-center justify-center rounded-full">
+            02
+          </span>
+          <h2 className="text-sm font-bold uppercase tracking-[0.25em] text-black/75">
+            Chủ đề & Mô tả
+          </h2>
         </div>
 
-        <ThemeSelector selectedTheme={selectedTheme} onThemeChange={onThemeChange} />
+        <ThemeSelector
+          selectedTheme={selectedTheme}
+          onThemeChange={onThemeChange}
+        />
 
         <div className="space-y-3">
-          <label className="text-xs font-bold uppercase tracking-widest text-black/55 block">Mô tả thêm (Tùy chọn)</label>
+          <label className="text-xs font-bold uppercase tracking-widest text-black/55 block">
+            Mô tả thêm (Tùy chọn)
+          </label>
           <textarea
             value={description}
             onChange={(e) => onDescriptionChange(e.target.value)}
@@ -107,8 +136,13 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
         </div>
 
         <div className="space-y-3">
-          <label className="text-xs font-bold uppercase tracking-widest text-black/55 block">Tỉ lệ khung hình</label>
-          <AspectRatioSelector selectedRatio={selectedAspectRatio} onRatioChange={onAspectRatioChange} />
+          <label className="text-xs font-bold uppercase tracking-widest text-black/55 block">
+            Tỉ lệ khung hình
+          </label>
+          <AspectRatioSelector
+            selectedRatio={selectedAspectRatio}
+            onRatioChange={onAspectRatioChange}
+          />
         </div>
       </section>
 
@@ -117,16 +151,22 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
         onClick={onGenerate}
         disabled={isGenerating || !productImage}
         className={cn(
-          'w-full py-5 rounded-2xl flex items-center justify-center gap-3 font-bold uppercase tracking-[0.25em] text-sm transition-all',
+          "w-full py-5 rounded-2xl flex items-center justify-center gap-3 font-bold uppercase tracking-[0.25em] text-sm transition-all",
           isGenerating || !productImage
-            ? 'bg-black/8 text-black/30 cursor-not-allowed'
-            : 'bg-[#1a1a1a] text-white hover:bg-orange-600 hover:scale-[1.01] active:scale-[0.99] shadow-xl shadow-black/15 hover:shadow-orange-600/25'
+            ? "bg-black/8 text-black/30 cursor-not-allowed"
+            : "bg-[#1a1a1a] text-white hover:bg-orange-600 hover:scale-[1.01] active:scale-[0.99] shadow-xl shadow-black/15 hover:shadow-orange-600/25",
         )}
       >
         {isGenerating ? (
-          <><Loader2 className="w-5 h-5 animate-spin" />Đang thiết kế...</>
+          <>
+            <Loader2 className="w-5 h-5 animate-spin" />
+            Đang thiết kế...
+          </>
         ) : (
-          <><Sparkles className="w-5 h-5" />Bắt đầu tạo mẫu</>
+          <>
+            <Sparkles className="w-5 h-5" />
+            Bắt đầu tạo mẫu
+          </>
         )}
       </button>
     </div>
