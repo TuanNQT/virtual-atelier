@@ -1,18 +1,45 @@
-import { useState, useCallback, useEffect } from 'react';
-import { useDropzone } from 'react-dropzone';
-import { GenerationResult, AspectRatio, Gender } from '../types';
-import { THEMES } from '../constants/config';
+import { useState, useCallback, useEffect } from "react";
+import { useDropzone } from "react-dropzone";
+import {
+  GenerationResult,
+  GenerationSession,
+  AspectRatio,
+  Gender,
+  PoseId,
+} from "../types";
+import { THEMES, POSES } from "../constants/config";
 
-const TOKEN_KEY = 'auth_token';
+const TOKEN_KEY = "auth_token";
+const HISTORY_KEY = "va_history";
+/** Lưu tối đa 10 kết quả gần nhất (mỗi kết quả = 1 session gồm product, model, 4 ảnh). Chỉ lưu URL ImageKit nên không lo quá tải localStorage. */
+const MAX_HISTORY_SESSIONS = 10;
 
 function getAuthHeaders(): Record<string, string> {
   const token = localStorage.getItem(TOKEN_KEY);
   return token
-    ? { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
-    : { 'Content-Type': 'application/json' };
+    ? { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }
+    : { "Content-Type": "application/json" };
 }
 
-interface UseImageGenerationReturn {
+function createThumbnail(dataUrl: string, size = 100): Promise<string> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      const ratio = img.height / img.width;
+      canvas.width = size;
+      canvas.height = size * ratio;
+      canvas
+        .getContext("2d")!
+        .drawImage(img, 0, 0, canvas.width, canvas.height);
+      resolve(canvas.toDataURL("image/jpeg", 0.5));
+    };
+    img.onerror = () => resolve("");
+    img.src = dataUrl;
+  });
+}
+
+export interface UseImageGenerationReturn {
   productImage: string | null;
   modelImage: string | null;
   isGenerating: boolean;
@@ -21,23 +48,30 @@ interface UseImageGenerationReturn {
   gender: Gender;
   selectedTheme: string;
   selectedAspectRatio: AspectRatio;
+  selectedPose: PoseId;
   description: string;
-  getProductProps: ReturnType<typeof useDropzone>['getRootProps'];
-  getProductInput: ReturnType<typeof useDropzone>['getInputProps'];
-  getModelProps: ReturnType<typeof useDropzone>['getRootProps'];
-  getModelInput: ReturnType<typeof useDropzone>['getInputProps'];
+  history: GenerationSession[];
+  getProductProps: ReturnType<typeof useDropzone>["getRootProps"];
+  getProductInput: ReturnType<typeof useDropzone>["getInputProps"];
+  getModelProps: ReturnType<typeof useDropzone>["getRootProps"];
+  getModelInput: ReturnType<typeof useDropzone>["getInputProps"];
   isProductDrag: boolean;
   isModelDrag: boolean;
-  setGender: (gender: Gender) => void;
-  setSelectedTheme: (theme: string) => void;
-  setSelectedAspectRatio: (ratio: AspectRatio) => void;
-  setDescription: (desc: string) => void;
-  setZoomedIndex: (index: number | null) => void;
-  setResults: (results: GenerationResult[]) => void;
-  setProductImage: (image: string | null) => void;
-  setModelImage: (image: string | null) => void;
-  handleGenerate: (userEmail: string | null) => Promise<void>;
-  downloadImage: (url: string, id: string) => void;
+  setGender: (g: Gender) => void;
+  setSelectedTheme: (t: string) => void;
+  setSelectedAspectRatio: (r: AspectRatio) => void;
+  setSelectedPose: (p: PoseId) => void;
+  setDescription: (d: string) => void;
+  setZoomedIndex: (i: number | null) => void;
+  setResults: (r: GenerationResult[]) => void;
+  setProductImage: (i: string | null) => void;
+  setModelImage: (i: string | null) => void;
+  handleGenerate: (email: string | null) => Promise<void>;
+  handleRegenerate: (index: number, email: string | null) => Promise<void>;
+  downloadImage: (url: string, filename: string) => void;
+  downloadAll: () => void;
+  loadSession: (s: GenerationSession) => void;
+  clearHistory: () => void;
   nextImage: () => void;
   prevImage: () => void;
 }
@@ -45,177 +79,314 @@ interface UseImageGenerationReturn {
 export const useImageGeneration = (): UseImageGenerationReturn => {
   const [productImage, setProductImage] = useState<string | null>(null);
   const [modelImage, setModelImage] = useState<string | null>(null);
-  const [gender, setGender] = useState<Gender>('female');
+  const [gender, setGender] = useState<Gender>("female");
   const [selectedTheme, setSelectedTheme] = useState(THEMES[0].id);
-  const [selectedAspectRatio, setSelectedAspectRatio] = useState<AspectRatio>('9:16');
-  const [description, setDescription] = useState('');
+  const [selectedAspectRatio, setSelectedAspectRatio] =
+    useState<AspectRatio>("9:16");
+  const [selectedPose, setSelectedPose] = useState<PoseId>("selfie");
+  const [description, setDescription] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [results, setResults] = useState<GenerationResult[]>([]);
   const [zoomedIndex, setZoomedIndex] = useState<number | null>(null);
+  const [history, setHistory] = useState<GenerationSession[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]");
+    } catch {
+      return [];
+    }
+  });
 
-  const onDropProduct = useCallback((acceptedFiles: File[]) => {
-    const file = acceptedFiles[0];
-    const reader = new FileReader();
-    reader.onload = () => setProductImage(reader.result as string);
-    reader.readAsDataURL(file);
+  useEffect(() => {
+    try {
+      localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+    } catch (e) {
+      console.warn("Không thể lưu lịch sử vào localStorage:", e);
+    }
+  }, [history]);
+
+  const onDropProduct = useCallback((files: File[]) => {
+    const r = new FileReader();
+    r.onload = () => setProductImage(r.result as string);
+    r.readAsDataURL(files[0]);
+  }, []);
+  const onDropModel = useCallback((files: File[]) => {
+    const r = new FileReader();
+    r.onload = () => setModelImage(r.result as string);
+    r.readAsDataURL(files[0]);
   }, []);
 
-  const onDropModel = useCallback((acceptedFiles: File[]) => {
-    const file = acceptedFiles[0];
-    const reader = new FileReader();
-    reader.onload = () => setModelImage(reader.result as string);
-    reader.readAsDataURL(file);
-  }, []);
-
-  const { getRootProps: getProductProps, getInputProps: getProductInput, isDragActive: isProductDrag } = useDropzone({
+  const {
+    getRootProps: getProductProps,
+    getInputProps: getProductInput,
+    isDragActive: isProductDrag,
+  } = useDropzone({
     onDrop: onDropProduct,
-    accept: { 'image/*': [] },
+    accept: { "image/*": [] },
     multiple: false,
   } as Parameters<typeof useDropzone>[0]);
-
-  const { getRootProps: getModelProps, getInputProps: getModelInput, isDragActive: isModelDrag } = useDropzone({
+  const {
+    getRootProps: getModelProps,
+    getInputProps: getModelInput,
+    isDragActive: isModelDrag,
+  } = useDropzone({
     onDrop: onDropModel,
-    accept: { 'image/*': [] },
+    accept: { "image/*": [] },
     multiple: false,
   } as Parameters<typeof useDropzone>[0]);
 
-  // ── Gọi server thay vì gọi Gemini trực tiếp ──────────────────────────────
   const generateSingle = useCallback(
-    async (variationIndex: number, retryCount = 0): Promise<GenerationResult | null> => {
-      const themeLabel = THEMES.find((t) => t.id === selectedTheme)?.label;
-
+    async (
+      variationIndex: number,
+      opts: {
+        gender?: Gender;
+        themeId?: string;
+        aspectRatio?: AspectRatio;
+        poseId?: PoseId;
+        description?: string;
+        productImg?: string;
+        modelImg?: string;
+      } = {},
+      retry = 0,
+    ): Promise<GenerationResult | null> => {
+      const themeLabel = THEMES.find(
+        (t) => t.id === (opts.themeId ?? selectedTheme),
+      )?.label;
+      const posePrompt =
+        POSES.find((p) => p.id === (opts.poseId ?? selectedPose))?.prompt ??
+        POSES[0].prompt;
       try {
-        const response = await fetch('/api/generate', {
-          method: 'POST',
+        const res = await fetch("/api/generate", {
+          method: "POST",
           headers: getAuthHeaders(),
           body: JSON.stringify({
-            productImageBase64: productImage!.split(',')[1],
-            modelImageBase64: modelImage ? modelImage.split(',')[1] : null,
-            gender,
+            productImageBase64: (opts.productImg ?? productImage)!.split(
+              ",",
+            )[1],
+            modelImageBase64:
+              (opts.modelImg ?? modelImage)?.split(",")[1] ?? null,
+            gender: opts.gender ?? gender,
             themeLabel,
-            selectedAspectRatio,
-            description,
+            selectedAspectRatio: opts.aspectRatio ?? selectedAspectRatio,
+            description: opts.description ?? description,
+            posePrompt,
             variationIndex,
           }),
         });
-
-        if (response.status === 429) {
-          if (retryCount < 3) {
-            const delay = Math.pow(2, retryCount) * 2000;
-            await new Promise((r) => setTimeout(r, delay));
-            return generateSingle(variationIndex, retryCount + 1);
+        if (res.status === 429) {
+          if (retry < 3) {
+            await new Promise((r) => setTimeout(r, Math.pow(2, retry) * 2000));
+            return generateSingle(variationIndex, opts, retry + 1);
           }
-          throw new Error('QUOTA_EXHAUSTED');
+          throw new Error("QUOTA_EXHAUSTED");
         }
-
-        if (!response.ok) {
-          const err = await response.json().catch(() => ({}));
-          throw new Error(err.error || 'Lỗi server');
+        if (!res.ok) {
+          const e = await res.json().catch(() => ({}));
+          throw new Error(e.error || "Lỗi server");
         }
-
-        const data = await response.json();
+        const data = await res.json();
         return {
           id: Math.random().toString(36).substr(2, 9),
           url: `data:image/png;base64,${data.imageBase64}`,
         };
-      } catch (error) {
-        throw error;
+      } catch (e) {
+        throw e;
       }
     },
-    [gender, selectedTheme, selectedAspectRatio, description, productImage, modelImage]
+    [
+      gender,
+      selectedTheme,
+      selectedAspectRatio,
+      selectedPose,
+      description,
+      productImage,
+      modelImage,
+    ],
   );
 
   const handleGenerate = useCallback(
-    async (userEmail: string | null) => {
-      if (!userEmail) {
-        alert('Vui lòng đăng nhập để sử dụng!');
+    async (email: string | null) => {
+      if (!email) {
+        alert("Vui lòng đăng nhập!");
         return;
       }
       if (!productImage) {
-        alert('Vui lòng tải lên ảnh sản phẩm!');
+        alert("Vui lòng tải ảnh sản phẩm!");
         return;
       }
-
-      // ✅ Fix logic check API key (was: !window.aistudio && window.aistudio — never true)
       if (window.aistudio) {
         const hasKey = await window.aistudio.hasSelectedApiKey();
         if (!hasKey) {
-          const confirmed = window.confirm(
-            'Bạn chưa chọn API Key trả phí. Bạn có muốn chọn ngay không?'
-          );
-          if (confirmed) {
+          if (window.confirm("Chưa chọn API Key. Chọn ngay?")) {
             await window.aistudio.openSelectKey();
             return;
           }
         }
       }
-
       setIsGenerating(true);
       setResults([]);
-
       let successCount = 0;
-
+      const newResults: GenerationResult[] = [];
       try {
-        // ✅ Generate 4 ảnh SONG SONG thay vì tuần tự — nhanh ~4x
-        const promises = [0, 1, 2, 3].map((i) =>
-          generateSingle(i).then((result) => {
-            if (result) {
-              setResults((prev) => [...prev, result]);
-              successCount++;
-            }
-            return result;
-          })
+        await Promise.allSettled(
+          [0, 1, 2, 3].map((i) =>
+            generateSingle(i).then((r) => {
+              if (r) {
+                setResults((p) => [...p, r]);
+                newResults.push(r);
+                successCount++;
+              }
+            }),
+          ),
         );
-
-        await Promise.allSettled(promises);
-      } catch (error: any) {
-        console.error('Generation failed:', error);
-        if (error.message === 'QUOTA_EXHAUSTED') {
-          alert('Bạn đã hết hạn mức sử dụng (429). Vui lòng đợi một lát hoặc kết nối API Key trả phí.');
-        } else {
-          alert('Đã có lỗi xảy ra trong quá trình tạo ảnh. Vui lòng thử lại.');
-        }
+      } catch (e: any) {
+        if (e.message === "QUOTA_EXHAUSTED")
+          alert(
+            "Hết hạn mức sử dụng. Vui lòng thử lại sau hoặc dùng API Key trả phí.",
+          );
       } finally {
         setIsGenerating(false);
-
-        // ✅ Chỉ tăng usage khi có ít nhất 1 ảnh thành công
         if (successCount > 0) {
-          fetch('/api/usage/increment', {
-            method: 'POST',
+          fetch("/api/usage/increment", {
+            method: "POST",
             headers: getAuthHeaders(),
-          }).catch((e) => console.error('Failed to increment usage', e));
+          }).catch(() => {});
+
+          // Upload to ImageKit — ảnh sản phẩm, mẫu (nếu có), kết quả. Chỉ lưu URL.
+          try {
+            const images = newResults.map((r) => ({
+              base64: r.url.split(",")[1] ?? "",
+              filename: `${r.id}.png`,
+            }));
+
+            const uploadRes = await fetch("/api/upload-to-imagekit", {
+              method: "POST",
+              headers: getAuthHeaders(),
+              body: JSON.stringify({
+                images,
+                productImage,
+                modelImage: modelImage || undefined,
+              }),
+            });
+            if (!uploadRes.ok) throw new Error("Upload failed");
+            const data = (await uploadRes.json()) as {
+              urls?: string[];
+              productImageUrl?: string;
+              modelImageUrl?: string;
+            };
+            const { urls, productImageUrl, modelImageUrl } = data;
+            if (!urls || urls.length !== newResults.length) {
+              throw new Error("Upload incomplete");
+            }
+            const resultsWithUrls: GenerationResult[] = newResults.map(
+              (r, i) => ({
+                ...r,
+                url: urls[i],
+              }),
+            );
+            setHistory((prev) =>
+              [
+                {
+                  id: Date.now().toString(),
+                  timestamp: Date.now(),
+                  results: resultsWithUrls,
+                  theme: selectedTheme,
+                  gender,
+                  aspectRatio: selectedAspectRatio,
+                  productImageUrl,
+                  modelImageUrl: modelImageUrl ?? undefined,
+                },
+                ...prev,
+              ].slice(0, MAX_HISTORY_SESSIONS),
+            );
+          } catch {
+            // ImageKit fail — không lưu history, app vẫn chạy bình thường
+            console.log("Save history failed");
+          }
         }
       }
     },
-    [productImage, generateSingle]
+    [
+      productImage,
+      modelImage,
+      generateSingle,
+      selectedTheme,
+      gender,
+      selectedAspectRatio,
+    ],
   );
 
-  const downloadImage = useCallback((url: string, id: string) => {
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `thu-do-hang-hieu-${id}.png`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  // #3 Regenerate single image
+  const handleRegenerate = useCallback(
+    async (index: number, email: string | null) => {
+      if (!email || !productImage) return;
+      setResults((prev) =>
+        prev.map((r, i) => (i === index ? { ...r, isRegenerating: true } : r)),
+      );
+      try {
+        const result = await generateSingle(index);
+        if (result)
+          setResults((prev) => prev.map((r, i) => (i === index ? result : r)));
+      } catch {
+        setResults((prev) =>
+          prev.map((r, i) =>
+            i === index ? { ...r, isRegenerating: false } : r,
+          ),
+        );
+      }
+    },
+    [productImage, generateSingle],
+  );
+
+  // #7 + #13
+  const downloadImage = useCallback((url: string, filename: string) => {
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }, []);
+
+  const downloadAll = useCallback(() => {
+    const theme = THEMES.find((t) => t.id === selectedTheme)?.id ?? "photo";
+    const date = new Date().toISOString().slice(0, 10);
+    results.forEach((r, i) =>
+      setTimeout(
+        () => downloadImage(r.url, `${theme}-${date}-${i + 1}.png`),
+        i * 300,
+      ),
+    );
+  }, [results, selectedTheme, downloadImage]);
+
+  // #1 History
+  const loadSession = useCallback((s: GenerationSession) => {
+    setResults(s.results);
+    setSelectedTheme(s.theme);
+    setSelectedAspectRatio(s.aspectRatio);
+  }, []);
+  const clearHistory = useCallback(() => {
+    setHistory([]);
+    localStorage.removeItem(HISTORY_KEY);
   }, []);
 
   const nextImage = useCallback(() => {
-    if (zoomedIndex !== null) setZoomedIndex((zoomedIndex + 1) % results.length);
+    if (zoomedIndex !== null)
+      setZoomedIndex((zoomedIndex + 1) % results.length);
   }, [zoomedIndex, results.length]);
-
   const prevImage = useCallback(() => {
-    if (zoomedIndex !== null) setZoomedIndex((zoomedIndex - 1 + results.length) % results.length);
+    if (zoomedIndex !== null)
+      setZoomedIndex((zoomedIndex - 1 + results.length) % results.length);
   }, [zoomedIndex, results.length]);
 
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
+    const onKey = (e: KeyboardEvent) => {
       if (zoomedIndex === null) return;
-      if (e.key === 'ArrowRight') nextImage();
-      else if (e.key === 'ArrowLeft') prevImage();
-      else if (e.key === 'Escape') setZoomedIndex(null);
+      if (e.key === "ArrowRight") nextImage();
+      else if (e.key === "ArrowLeft") prevImage();
+      else if (e.key === "Escape") setZoomedIndex(null);
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, [zoomedIndex, nextImage, prevImage]);
 
   return {
@@ -227,7 +398,9 @@ export const useImageGeneration = (): UseImageGenerationReturn => {
     gender,
     selectedTheme,
     selectedAspectRatio,
+    selectedPose,
     description,
+    history,
     getProductProps,
     getProductInput,
     getModelProps,
@@ -237,13 +410,18 @@ export const useImageGeneration = (): UseImageGenerationReturn => {
     setGender,
     setSelectedTheme,
     setSelectedAspectRatio,
+    setSelectedPose,
     setDescription,
     setZoomedIndex,
     setResults,
     setProductImage,
     setModelImage,
     handleGenerate,
+    handleRegenerate,
     downloadImage,
+    downloadAll,
+    loadSession,
+    clearHistory,
     nextImage,
     prevImage,
   };

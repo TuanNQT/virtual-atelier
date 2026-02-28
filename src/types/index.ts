@@ -1,10 +1,35 @@
-// Generation Result Type
 export interface GenerationResult {
   id: string;
   url: string;
+  isRegenerating?: boolean;
 }
 
-// Window AI Studio API Type
+// #1 History
+export interface GenerationSession {
+  id: string;
+  timestamp: number;
+  results: GenerationResult[];
+  theme: string;
+  gender: string;
+  aspectRatio: AspectRatio;
+  /** URL ảnh sản phẩm (ImageKit). Dùng ?tr=w-100 để thumbnail. Có thể thiếu ở lịch sử cũ. */
+  productImageUrl?: string;
+  /** URL ảnh mẫu (ImageKit), nếu có. */
+  modelImageUrl?: string;
+  /** @deprecated Dùng productImageUrl + ?tr=w-100 thay thế. Giữ để tương thích lịch sử cũ. */
+  productImageThumb?: string;
+}
+
+// #2 Pose
+export type PoseId = "selfie" | "standing" | "walking" | "sitting" | "detail";
+export interface Pose {
+  id: PoseId;
+  label: string;
+  icon: string;
+  prompt: string;
+}
+
+// Window AI Studio
 declare global {
   interface Window {
     aistudio?: {
@@ -14,22 +39,14 @@ declare global {
   }
 }
 
-// User Type
 export interface User {
   email: string;
   request_count: number;
 }
-
-// Gender Type
-export type Gender = 'male' | 'female';
-
-// Theme Type
+export type Gender = "male" | "female";
 export type ThemeId = string;
+export type AspectRatio = "9:16" | "3:4" | "1:1" | "4:3" | "16:9";
 
-// Aspect Ratio Type
-export type AspectRatio = '9:16' | '3:4' | '1:1' | '4:3' | '16:9';
-
-// Dropzone prop types
 export interface DropzoneRootProps {
   onClick?: React.MouseEventHandler<HTMLDivElement>;
   onDragEnter?: React.DragEventHandler<HTMLDivElement>;
@@ -40,7 +57,6 @@ export interface DropzoneRootProps {
   tabIndex?: number;
   [key: string]: unknown;
 }
-
 export interface DropzoneInputProps {
   accept?: string;
   multiple?: boolean;

@@ -22,15 +22,15 @@ export const Header: React.FC<HeaderProps> = ({
   onViewChange,
 }) => {
   return (
-    <header className="sticky top-0 z-40 bg-white/90 backdrop-blur-xl border-b border-black/8 px-8 py-5">
+    <header className="sticky top-0 z-40 bg-white/90 backdrop-blur-xl border-b border-black/8 px-4 sm:px-6 md:px-8 py-4 md:py-5">
       <div className="max-w-7xl mx-auto flex items-center justify-between">
         <div className="flex items-center gap-8">
           <div className="flex items-center gap-4">
-            <div className="w-11 h-11 bg-[#1a1a1a] rounded-full flex items-center justify-center shadow-lg shadow-black/10">
-              <Sparkles className="text-white w-5 h-5" />
+            <div className="w-9 h-9 sm:w-11 sm:h-11 bg-[#1a1a1a] rounded-full flex items-center justify-center shadow-lg shadow-black/10">
+              <Sparkles className="text-white w-4 h-4 sm:w-5 sm:h-5" />
             </div>
-            <div>
-              <h1 className="text-xl font-serif font-medium tracking-tight italic leading-none text-[#1a1a1a]">
+            <div className="min-w-0">
+              <h1 className="text-base sm:text-xl font-serif font-medium tracking-tight italic leading-none text-[#1a1a1a] truncate">
                 Thử Đồ Hàng Hiệu
               </h1>
               <p className="text-[11px] uppercase tracking-[0.2em] font-semibold text-black/40 mt-0.5">Virtual Atelier</p>

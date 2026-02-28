@@ -13,13 +13,13 @@ export const ThemeSelector: React.FC<ThemeSelectorProps> = ({
   onThemeChange,
 }) => {
   return (
-    <div className="grid grid-cols-3 gap-3">
+    <div className="grid grid-cols-3 gap-2 sm:gap-3">
       {THEMES.map((theme) => (
         <button
           key={theme.id}
           onClick={() => onThemeChange(theme.id)}
           className={cn(
-            'flex flex-col items-center justify-center p-5 rounded-2xl border transition-all gap-2 group relative overflow-hidden',
+            'flex flex-col items-center justify-center p-3 sm:p-5 rounded-xl sm:rounded-2xl border transition-all gap-1.5 sm:gap-2 group relative overflow-hidden',
             selectedTheme === theme.id
               ? 'bg-[#1a1a1a] text-white border-[#1a1a1a] shadow-xl shadow-black/20 scale-[1.02]'
               : 'bg-white border-black/12 text-black/65 hover:border-black/25 hover:text-black hover:bg-black/3'

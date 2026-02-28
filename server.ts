@@ -9,6 +9,8 @@ import path from "path";
 import { fileURLToPath } from "url";
 import crypto from "crypto";
 import { GoogleGenAI } from "@google/genai";
+import ImageKit from "@imagekit/nodejs";
+import { GEMINI_MODEL } from "./src/constants/config.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -36,19 +38,25 @@ function getSession(token: string): Session | null {
   return session;
 }
 
-setInterval(() => {
-  const now = Date.now();
-  sessions.forEach((s, token) => {
-    if (now > s.expiresAt) sessions.delete(token);
-  });
-}, 30 * 60 * 1000);
+setInterval(
+  () => {
+    const now = Date.now();
+    sessions.forEach((s, token) => {
+      if (now > s.expiresAt) sessions.delete(token);
+    });
+  },
+  30 * 60 * 1000,
+);
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
 function requireAuth(req: Request, res: Response, next: NextFunction) {
   const token = req.headers.authorization?.replace("Bearer ", "");
   if (!token) return res.status(401).json({ error: "Chưa đăng nhập" });
   const session = getSession(token);
-  if (!session) return res.status(401).json({ error: "Phiên đăng nhập hết hạn, vui lòng đăng nhập lại" });
+  if (!session)
+    return res
+      .status(401)
+      .json({ error: "Phiên đăng nhập hết hạn, vui lòng đăng nhập lại" });
   (req as any).session = session;
   next();
 }
@@ -57,7 +65,10 @@ function requireAdmin(req: Request, res: Response, next: NextFunction) {
   requireAuth(req, res, () => {
     const session = (req as any).session as Session;
     const initialEmail = process.env.INITIAL_ALLOWED_EMAIL;
-    if (!initialEmail || session.email.toLowerCase() !== initialEmail.toLowerCase()) {
+    if (
+      !initialEmail ||
+      session.email.toLowerCase() !== initialEmail.toLowerCase()
+    ) {
       return res.status(403).json({ error: "Không có quyền admin" });
     }
     next();
@@ -77,7 +88,9 @@ function rateLimit(windowMs: number, max: number) {
       return next();
     }
     if (record.count >= max) {
-      return res.status(429).json({ error: "Quá nhiều yêu cầu, vui lòng thử lại sau." });
+      return res
+        .status(429)
+        .json({ error: "Quá nhiều yêu cầu, vui lòng thử lại sau." });
     }
     record.count++;
     next();
@@ -128,9 +141,17 @@ async function startServer() {
     if (!email) return res.status(400).json({ error: "Email không hợp lệ" });
     try {
       const user = await getUserByEmail(email);
-      if (!user) return res.status(403).json({ error: "Email không có quyền truy cập!" });
+      if (!user)
+        return res
+          .status(403)
+          .json({ error: "Email không có quyền truy cập!" });
       const token = createSession(user.email);
-      res.json({ success: true, token, email: user.email, requestCount: user.request_count });
+      res.json({
+        success: true,
+        token,
+        email: user.email,
+        requestCount: user.request_count,
+      });
     } catch (error) {
       console.error("Verification error:", error);
       res.status(500).json({ error: "Lỗi hệ thống khi xác thực" });
@@ -161,56 +182,189 @@ async function startServer() {
   });
 
   // ── Generate ──────────────────────────────────────────────────────────────
-  app.post("/api/generate", requireAuth, rateLimit(60_000, 6), async (req, res) => {
-    const { productImageBase64, modelImageBase64, gender, themeLabel, selectedAspectRatio, description, variationIndex } = req.body;
+  app.post(
+    "/api/generate",
+    requireAuth,
+    rateLimit(60_000, 6),
+    async (req, res) => {
+      const {
+        productImageBase64,
+        modelImageBase64,
+        gender,
+        themeLabel,
+        selectedAspectRatio,
+        description,
+        variationIndex,
+        posePrompt,
+      } = req.body;
 
-    if (!productImageBase64) return res.status(400).json({ error: "Thiếu ảnh sản phẩm" });
+      if (!productImageBase64)
+        return res.status(400).json({ error: "Thiếu ảnh sản phẩm" });
 
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) return res.status(500).json({ error: "Server chưa cấu hình GEMINI_API_KEY" });
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey)
+        return res
+          .status(500)
+          .json({ error: "Server chưa cấu hình GEMINI_API_KEY" });
 
-    try {
-      const ai = new GoogleGenAI({ apiKey });
-      const basePrompt = `A high-quality, professional fashion photograph of a ${
-        gender === "female" ? "female" : "male"
-      } Vietnamese model, approximately 20 years old, looking young and energetic.
-The model is holding an iPhone 16 Pro Max and taking a selfie in front of a mirror.
+      try {
+        const ai = new GoogleGenAI({ apiKey });
+        const basePrompt = `A high-quality, professional fashion photograph of a ${
+          gender === "female" ? "female" : "male"
+        } Vietnamese model, approximately 20 years old, looking young and energetic.
+The model is ${posePrompt || "holding an iPhone taking a selfie in front of a mirror"}.
 The model is wearing the exact clothing shown in the provided product image.
-${gender === "female"
-  ? "The model has long flowing hair, a beautiful tall physique with balanced curves."
-  : "The model has a stylish side part hairstyle, a fit tall physique with 6-pack abs and broad shoulders."}
+${
+  gender === "female"
+    ? "The model has long flowing hair, a beautiful tall physique with balanced curves."
+    : "The model has a stylish side part hairstyle, a fit tall physique with 6-pack abs and broad shoulders."
+}
 The setting is a ${themeLabel || "modern"} environment.
 ${description ? `Additional context: ${description}` : ""}
 The output must be a realistic, high-resolution image with a ${selectedAspectRatio || "9:16"} aspect ratio. (Variation ${(variationIndex || 0) + 1})`;
 
-      const parts: any[] = [{ inlineData: { data: productImageBase64, mimeType: "image/png" } }];
-      if (modelImageBase64) parts.push({ inlineData: { data: modelImageBase64, mimeType: "image/png" } });
-      parts.push({ text: basePrompt });
+        const parts: any[] = [
+          { inlineData: { data: productImageBase64, mimeType: "image/png" } },
+        ];
+        if (modelImageBase64)
+          parts.push({
+            inlineData: { data: modelImageBase64, mimeType: "image/png" },
+          });
+        parts.push({ text: basePrompt });
 
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash-image",
-        contents: { parts },
-        config: { imageConfig: { aspectRatio: selectedAspectRatio || "9:16" } } as any,
-      });
+        const response = await ai.models.generateContent({
+          model: GEMINI_MODEL,
+          contents: { parts },
+          config: {
+            imageConfig: { aspectRatio: selectedAspectRatio || "9:16" },
+          } as any,
+        });
 
-      const imagePart = response.candidates?.[0]?.content?.parts?.find((p: any) => p.inlineData);
-      if (!imagePart?.inlineData) return res.status(500).json({ error: "Không tạo được ảnh" });
+        const imagePart = response.candidates?.[0]?.content?.parts?.find(
+          (p: any) => p.inlineData,
+        );
+        if (!imagePart?.inlineData)
+          return res.status(500).json({ error: "Không tạo được ảnh" });
 
-      res.json({ success: true, imageBase64: imagePart.inlineData.data });
-    } catch (error: any) {
-      console.error("Generation error:", error);
-      if (error.status === 429 || error.message?.includes("429")) {
-        return res.status(429).json({ error: "QUOTA_EXHAUSTED" });
+        res.json({ success: true, imageBase64: imagePart.inlineData.data });
+      } catch (error: any) {
+        console.error("Generation error:", error);
+        if (error.status === 429 || error.message?.includes("429")) {
+          return res.status(429).json({ error: "QUOTA_EXHAUSTED" });
+        }
+        res.status(500).json({ error: "Lỗi khi tạo ảnh" });
       }
-      res.status(500).json({ error: "Lỗi khi tạo ảnh" });
-    }
-  });
+    },
+  );
+
+  // ── ImageKit Upload (cho history — lưu URL thay base64) ───────────────────
+  // urlEndpoint: public (https://ik.imagekit.io/virtualatelier)
+  // privateKey: CHỈ server, KHÔNG BAO GIỜ gửi về client
+  const IMAGEKIT_URL_ENDPOINT =
+    process.env.IMAGEKIT_URL_ENDPOINT ||
+    "https://ik.imagekit.io/virtualatelier";
+
+  app.post(
+    "/api/upload-to-imagekit",
+    requireAuth,
+    rateLimit(60_000, 20),
+    async (req, res) => {
+      const {
+        images,
+        productImage,
+        modelImage,
+      }: {
+        images?: Array<{ base64: string; filename: string }>;
+        productImage?: string;
+        modelImage?: string;
+      } = req.body;
+      if (!Array.isArray(images) || images.length === 0) {
+        return res.status(400).json({ error: "Thiếu danh sách ảnh" });
+      }
+
+      const privateKey = process.env.IMAGEKIT_PRIVATE_KEY;
+      const urlEndpoint =
+        process.env.IMAGEKIT_URL_ENDPOINT ||
+        "https://ik.imagekit.io/virtualatelier";
+
+      if (!privateKey) {
+        return res
+          .status(500)
+          .json({ error: "Server chưa cấu hình IMAGEKIT_PRIVATE_KEY" });
+      }
+
+      const client = new ImageKit({ privateKey });
+      const folder = `va/${new Date().toISOString().slice(0, 10)}`;
+      const cleanEndpoint = urlEndpoint.replace(/\/$/, "");
+
+      const uploadOne = async (
+        base64: string,
+        filename: string,
+      ): Promise<string | null> => {
+        try {
+          if (!base64) return null;
+
+          const dataUri = base64.startsWith("data:")
+            ? base64
+            : `data:image/png;base64,${base64}`;
+
+          const resp = await client.files.upload({
+            file: dataUri,
+            fileName: filename,
+            folder,
+            useUniqueFileName: true,
+          });
+
+          return (
+            resp?.url ||
+            (resp?.filePath
+              ? `${cleanEndpoint}/${resp.filePath.replace(/^\//, "")}`
+              : null)
+          );
+        } catch (err) {
+          console.error("Upload single file error:", err);
+          return null; // không crash toàn bộ request
+        }
+      };
+
+      try {
+        // 1️⃣ Upload results song song
+        const resultUploads = await Promise.all(
+          images.map(({ base64, filename }) => uploadOne(base64, filename)),
+        );
+
+        const urls = resultUploads.filter(
+          (u): u is string => typeof u === "string",
+        );
+
+        if (urls.length !== images.length) {
+          return res.status(500).json({
+            error: "Một số ảnh result upload thất bại",
+          });
+        }
+
+        return res.json({
+          success: true,
+          urls,
+        });
+      } catch (err) {
+        console.error("ImageKit upload fatal error:", err);
+        return res.status(500).json({
+          error: "Lỗi khi upload lên ImageKit",
+        });
+      }
+    },
+  );
 
   // ── Admin ─────────────────────────────────────────────────────────────────
   app.get("/api/admin/check", requireAuth, (req, res) => {
     const session = (req as any).session as Session;
     const initialEmail = process.env.INITIAL_ALLOWED_EMAIL;
-    res.json({ isAdmin: !!initialEmail && session.email.toLowerCase() === initialEmail.toLowerCase() });
+    res.json({
+      isAdmin:
+        !!initialEmail &&
+        session.email.toLowerCase() === initialEmail.toLowerCase(),
+    });
   });
 
   app.get("/api/admin/list-users", requireAdmin, async (_req, res) => {
@@ -237,7 +391,9 @@ The output must be a realistic, high-resolution image with a ${selectedAspectRat
     if (!email) return res.status(400).json({ error: "Email không hợp lệ" });
     const initialEmail = process.env.INITIAL_ALLOWED_EMAIL;
     if (initialEmail && email === initialEmail.toLowerCase()) {
-      return res.status(400).json({ error: "Không thể xóa tài khoản admin gốc" });
+      return res
+        .status(400)
+        .json({ error: "Không thể xóa tài khoản admin gốc" });
     }
     try {
       await deleteUser(email);
@@ -249,14 +405,21 @@ The output must be a realistic, high-resolution image with a ${selectedAspectRat
 
   // ── Vite / static ─────────────────────────────────────────────────────────
   if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({ server: { middlewareMode: true }, appType: "spa" });
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: "spa",
+    });
     app.use(vite.middlewares);
   } else {
     app.use(express.static("dist"));
-    app.get("*", (_req, res) => res.sendFile(path.resolve(__dirname, "dist/index.html")));
+    app.get("*", (_req, res) =>
+      res.sendFile(path.resolve(__dirname, "dist/index.html")),
+    );
   }
 
-  app.listen(PORT, "0.0.0.0", () => console.log(`Server running on http://localhost:${PORT}`));
+  app.listen(PORT, "0.0.0.0", () =>
+    console.log(`Server running on http://localhost:${PORT}`),
+  );
 }
 
 startServer();
