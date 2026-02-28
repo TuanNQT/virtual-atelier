@@ -234,7 +234,6 @@ export async function seedInitialUser(email: string): Promise<void> {
 // G: productImageUrl | H: modelImageUrl | I: results (JSON array of {id, url})
 
 const HISTORY_SHEET_NAME = "History";
-const HISTORY_MAX_PER_USER = 10;
 
 export interface HistoryRow {
   session_id: string;
@@ -300,7 +299,7 @@ export async function initializeHistorySheet(): Promise<void> {
   }
 }
 
-/** Lưu 1 session vào sheet History. Tự động xóa bớt nếu user có > MAX sessions. */
+/** Lưu 1 session vào sheet History. */
 export async function saveHistorySession(row: HistoryRow): Promise<void> {
   const SHEET_ID = getSheetId();
   const auth = await initializeClient();
@@ -328,17 +327,9 @@ export async function saveHistorySession(row: HistoryRow): Promise<void> {
       ],
     },
   });
-
-  // Trim — xóa các session cũ nhất của user nếu vượt quá MAX
-  // Bọc riêng để lỗi trim không làm fail toàn bộ save
-  try {
-    await trimUserHistory(row.email, sheets, SHEET_ID);
-  } catch (trimErr) {
-    console.error("[googleSheets] trimUserHistory error:", trimErr);
-  }
 }
 
-/** Lấy tối đa MAX sessions gần nhất của user (sort theo timestamp desc) */
+/** Lấy toàn bộ sessions của user (sort theo timestamp desc) */
 export async function getHistorySessions(email: string): Promise<HistoryRow[]> {
   const SHEET_ID = getSheetId();
   const auth = await initializeClient();
@@ -369,8 +360,7 @@ export async function getHistorySessions(email: string): Promise<HistoryRow[]> {
         }
       })(),
     }))
-    .sort((a, b) => b.timestamp - a.timestamp)
-    .slice(0, HISTORY_MAX_PER_USER);
+    .sort((a, b) => b.timestamp - a.timestamp);
 
   return userRows;
 }
@@ -387,80 +377,39 @@ export async function clearUserHistory(email: string): Promise<void> {
   });
 
   const rows: string[][] = (response.data.values as string[][]) || [];
+
+  // sheetRowIndex 0-based theo Sheets API (header = 0, data bắt đầu từ 1)
   const indicesToDelete = rows
     .map((r, i) => (r[1]?.toLowerCase() === email.toLowerCase() ? i + 1 : -1))
     .filter((i) => i !== -1)
-    .reverse(); // xóa từ dưới lên để index không bị lệch
+    .sort((a, b) => b - a); // DESC — xóa từ dưới lên
 
   if (indicesToDelete.length === 0) return;
 
-  // Lấy sheetId thật (numeric) của History sheet
   const meta = await sheets.spreadsheets.get({ spreadsheetId: SHEET_ID });
   const historySheet = meta.data.sheets?.find(
     (s) => s.properties?.title === HISTORY_SHEET_NAME,
   );
   const numericSheetId = historySheet?.properties?.sheetId ?? 1;
 
-  await sheets.spreadsheets.batchUpdate({
-    spreadsheetId: SHEET_ID,
-    requestBody: {
-      requests: indicesToDelete.map((rowIndex) => ({
-        deleteDimension: {
-          range: {
-            sheetId: numericSheetId,
-            dimension: "ROWS",
-            startIndex: rowIndex + 1, // +1 vì header ở row 0
-            endIndex: rowIndex + 2,
+  // Xóa từng row một để tránh index shift sau mỗi lần xóa
+  for (const rowIndex of indicesToDelete) {
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: SHEET_ID,
+      requestBody: {
+        requests: [
+          {
+            deleteDimension: {
+              range: {
+                sheetId: numericSheetId,
+                dimension: "ROWS",
+                startIndex: rowIndex,
+                endIndex: rowIndex + 1,
+              },
+            },
           },
-        },
-      })),
-    },
-  });
-}
-
-/** Trim xuống còn MAX sessions — xóa sessions cũ nhất của user */
-async function trimUserHistory(
-  email: string,
-  sheets: sheets_v4.Sheets,
-  SHEET_ID: string,
-): Promise<void> {
-  const response = await sheets.spreadsheets.values.get({
-    spreadsheetId: SHEET_ID,
-    range: `${HISTORY_SHEET_NAME}!A2:C`,
-  });
-
-  const rows: string[][] = (response.data.values as string[][]) || [];
-  const userEntries = rows
-    .map((r, i) => ({
-      index: i,
-      email: r[1] ?? "",
-      timestamp: parseInt(r[2]) || 0,
-    }))
-    .filter((e) => e.email.toLowerCase() === email.toLowerCase())
-    .sort((a, b) => b.timestamp - a.timestamp); // newest first
-
-  const toDelete = userEntries.slice(HISTORY_MAX_PER_USER).reverse();
-  if (toDelete.length === 0) return;
-
-  const meta = await sheets.spreadsheets.get({ spreadsheetId: SHEET_ID });
-  const historySheet = meta.data.sheets?.find(
-    (s) => s.properties?.title === HISTORY_SHEET_NAME,
-  );
-  const numericSheetId = historySheet?.properties?.sheetId ?? 1;
-
-  await sheets.spreadsheets.batchUpdate({
-    spreadsheetId: SHEET_ID,
-    requestBody: {
-      requests: toDelete.map((e) => ({
-        deleteDimension: {
-          range: {
-            sheetId: numericSheetId,
-            dimension: "ROWS",
-            startIndex: e.index + 1,
-            endIndex: e.index + 2,
-          },
-        },
-      })),
-    },
-  });
+        ],
+      },
+    });
+  }
 }

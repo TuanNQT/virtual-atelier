@@ -22,7 +22,7 @@ export default function App() {
     handleVerifyEmail,
     handleLogout,
   } = useAuth();
-  const ig = useImageGeneration();
+  const ig = useImageGeneration(userEmail);
   const { isAdmin, currentView, setCurrentView } = useAdmin(userEmail);
   const [hasApiKey, setHasApiKey] = useState<boolean>(true);
   const [mobileSheetOpen, setMobileSheetOpen] = useState(false);

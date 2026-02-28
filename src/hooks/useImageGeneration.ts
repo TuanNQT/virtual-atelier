@@ -73,7 +73,9 @@ export interface UseImageGenerationReturn {
   prevImage: () => void;
 }
 
-export const useImageGeneration = (): UseImageGenerationReturn => {
+export const useImageGeneration = (
+  userEmail: string | null,
+): UseImageGenerationReturn => {
   const [productImage, setProductImage] = useState<string | null>(null);
   const [modelImage, setModelImage] = useState<string | null>(null);
   const [gender, setGender] = useState<Gender>("female");
@@ -86,27 +88,23 @@ export const useImageGeneration = (): UseImageGenerationReturn => {
   const [results, setResults] = useState<GenerationResult[]>([]);
   const [zoomedIndex, setZoomedIndex] = useState<number | null>(null);
   const [history, setHistory] = useState<GenerationSession[]>([]);
-  const [historyLoaded, setHistoryLoaded] = useState(false);
 
-  // Fetch history từ server khi mount
+  // Fetch history khi login thành công (userEmail thay đổi từ null -> có giá trị)
+  // Reset về [] khi logout (userEmail -> null)
   useEffect(() => {
+    if (!userEmail) {
+      setHistory([]);
+      return;
+    }
     const token = localStorage.getItem(TOKEN_KEY);
-    if (!token || historyLoaded) return;
+    if (!token) return;
     fetch("/api/history", {
       headers: {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
       },
     })
-      .then(async (r) => {
-        const text = await r.text();
-        if (!r.ok) return null;
-        try {
-          return JSON.parse(text);
-        } catch {
-          return null;
-        }
-      })
+      .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (data?.sessions) {
           setHistory(
@@ -123,9 +121,8 @@ export const useImageGeneration = (): UseImageGenerationReturn => {
           );
         }
       })
-      .catch((err) => console.error("[history GET] fetch error:", err))
-      .finally(() => setHistoryLoaded(true));
-  }, [historyLoaded]);
+      .catch(() => {});
+  }, [userEmail]);
 
   const onDropProduct = useCallback((files: File[]) => {
     const r = new FileReader();
@@ -341,10 +338,9 @@ export const useImageGeneration = (): UseImageGenerationReturn => {
                 console.error("[history POST] fetch error:", err),
               );
             // Cập nhật state local
-            setHistory((prev) => [newSession, ...prev].slice(0, 10));
+            setHistory((prev) => [newSession, ...prev]);
           } catch {
             // ImageKit fail — không lưu history, app vẫn chạy bình thường
-            console.log("Save history failed");
           }
         }
       }
